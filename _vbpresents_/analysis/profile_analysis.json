@@ -1,0 +1,37 @@
+{
+    "profile_data": {
+        "username": "_vbpresents_",
+        "fullname": "Vino💙🐈",
+        "bio": "Alight☄️>>\nRandom Relatable Posts🤍",
+        "followers": 2147,
+        "following": 1166,
+        "is_private": false,
+        "external_url": null,
+        "business_category": null
+    },
+    "sentiment_analysis": {
+        "username": {
+            "label": "NEUTRAL",
+            "score": 0.5
+        },
+        "fullname": {
+            "label": "NEUTRAL",
+            "score": 0.5
+        },
+        "bio": {
+            "label": "NEUTRAL",
+            "score": 0.5
+        }
+    },
+    "risk_assessment": {
+        "individual_risks": {
+            "username": 0,
+            "fullname": 0,
+            "bio": 0,
+            "bio_confidence": 0.5
+        },
+        "overall_risk": 0.0,
+        "risk_level": "Low",
+        "risk_keywords_detected": []
+    }
+}
