@@ -1,0 +1,64 @@
+{
+    "profiles": [
+        {
+            "username": "iamhalsey",
+            "risk_score": 0.2883454918861389,
+            "risk_level": "Medium",
+            "timestamp": "2025-04-25 22:40:06"
+        },
+        {
+            "username": "_hsitin",
+            "risk_score": 0.12781869173049928,
+            "risk_level": "Low",
+            "timestamp": "2025-04-25 12:11:15"
+        },
+        {
+            "username": "cluelessbymia",
+            "risk_score": 0.6618111371994018,
+            "risk_level": "High",
+            "timestamp": "2025-04-25 23:24:43"
+        },
+        {
+            "username": "nitish_lewis",
+            "risk_score": 0.7083879470825196,
+            "risk_level": "High",
+            "timestamp": "2025-04-25 16:28:44"
+        },
+        {
+            "username": "iamvignesh",
+            "risk_score": 0.18650290966033936,
+            "risk_level": "Low",
+            "timestamp": "2025-04-25 22:40:40"
+        },
+        {
+            "username": "_viharahamed_29",
+            "risk_score": 0.25,
+            "risk_level": "Medium",
+            "timestamp": "2025-04-25 22:41:25"
+        },
+        {
+            "username": "shruthii_11ss",
+            "risk_score": 0.23762329518795014,
+            "risk_level": "Medium",
+            "timestamp": "2025-04-25 23:06:39"
+        },
+        {
+            "username": "im_suicidal_emo",
+            "risk_score": 0.8961390376091003,
+            "risk_level": "High",
+            "timestamp": "2025-04-26 09:35:15"
+        },
+        {
+            "username": "anish_vr46",
+            "risk_score": 0.17631341516971585,
+            "risk_level": "Low",
+            "timestamp": "2025-04-25 23:22:53"
+        },
+        {
+            "username": "_.shailesh.s._",
+            "risk_score": 0.6860283046960831,
+            "risk_level": "High",
+            "timestamp": "2025-04-26 09:36:32"
+        }
+    ]
+}

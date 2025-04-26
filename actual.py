@@ -10,6 +10,14 @@ import pandas as pd
 from transformers import pipeline
 import plotly.express as px
 import re
+import requests
+from PIL import Image
+from io import BytesIO
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.applications.resnet50 import preprocess_input
+from tensorflow.keras.preprocessing.image import img_to_array
 
 try:
     import getpass
@@ -93,6 +101,99 @@ def analyze_text_sentiment(text, analyzer):
         print(f"Error in sentiment analysis: {str(e)}")
         return fallback_sentiment_analysis(text)
 
+def create_image_analyzer():
+    """Initialize the image analysis model"""
+    try:
+        model = ResNet50(weights='imagenet', include_top=True)
+        return model
+    except Exception as e:
+        print(f"Error initializing image analyzer: {str(e)}")
+        return None
+
+def analyze_profile_picture(image_path, model):
+    """
+    Analyze profile picture for potential risks
+    
+    Args:
+        image_path: URL or local path to the profile picture
+        model: Pre-trained image analysis model
+    
+    Returns:
+        dict: Analysis results including risk score and detected features
+    """
+    try:
+        if isinstance(image_path, str) and image_path.startswith('http'):
+            response = requests.get(image_path)
+            if response.status_code != 200:
+                return {"risk_score": 0.0, "error": "Failed to download image"}
+            image = Image.open(BytesIO(response.content))
+        else:
+            image = Image.open(image_path)
+
+        # Convert to RGB if necessary
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        # Resize and preprocess
+        image = image.resize((224, 224))
+        img_array = img_to_array(image)
+        img_array = np.expand_dims(img_array, axis=0)
+        img_array = preprocess_input(img_array)
+
+        # Get predictions
+        predictions = model.predict(img_array)
+        from tensorflow.keras.applications.resnet50 import decode_predictions
+        decoded_predictions = decode_predictions(predictions, top=5)[0]
+
+        # Define risky categories and their risk weights
+        risk_categories = {
+            'weapon': 0.9,
+            'knife': 0.8,
+            'gun': 0.9,
+            'drugs': 0.8,
+            'alcohol': 0.6,
+            'cigarette': 0.6,
+            'violence': 0.8,
+            'blood': 0.7,
+            'danger': 0.7,
+            'terrorism':0.9,
+            'abuse':0.7,
+            'hate':0.6,
+            'harm':0.9,
+            'illegal':0.9,
+            'drug':0.9,
+            'suicide':0.9,
+            'harm':0.9,
+            'attack':0.8,
+            'revenge':0.7,
+            'extremist':0.4,
+            'radical':0.6,
+            
+
+        }
+
+        # Calculate risk score based on detected categories
+        max_risk_score = 0.0
+        detected_categories = {}
+
+        for _, category, confidence in decoded_predictions:
+            category = category.lower()
+            for risk_key, risk_weight in risk_categories.items():
+                if risk_key in category:
+                    risk_score = confidence * risk_weight
+                    max_risk_score = max(max_risk_score, risk_score)
+                    detected_categories[category] = confidence
+
+        return {
+            "risk_score": max_risk_score,
+            "detected_categories": detected_categories,
+            "raw_predictions": [(cat, float(conf)) for _, cat, conf in decoded_predictions]
+        }
+
+    except Exception as e:
+        print(f"Error analyzing profile picture: {str(e)}")
+        return {"risk_score": 0.0, "error": str(e)}
+
 def analyze_instagram_profile(username, analyzer, insta_context, retry_count=3, retry_delay=5):
     """
     Analyze an Instagram profile for sentiment risks with retry mechanism
@@ -119,28 +220,49 @@ def analyze_instagram_profile(username, analyzer, insta_context, retry_count=3, 
                 "is_private": profile.is_private,
                 "external_url": profile.external_url,
                 "business_category": profile.business_category_name,
+                "profile_pic_url": profile.profile_pic_url
             }
+
+            # Text analysis
             username_sentiment = analyze_text_sentiment(username, analyzer)
             fullname_sentiment = analyze_text_sentiment(profile.full_name, analyzer)
             bio_sentiment = analyze_text_sentiment(profile.biography, analyzer)
-            risk_scores = {
+
+            # Profile picture analysis
+            image_analyzer = create_image_analyzer()
+            if image_analyzer and profile.profile_pic_url:
+                pfp_analysis = analyze_profile_picture(profile.profile_pic_url, image_analyzer)
+            else:
+                pfp_analysis = {"risk_score": 0.0, "error": "Image analysis not available"}
+
+            # Calculate risk scores with new weights
+            text_risk_scores = {
                 "username": username_sentiment.get("risk_score", 0.0),
                 "fullname": fullname_sentiment.get("risk_score", 0.0),
                 "bio": bio_sentiment.get("risk_score", 0.0),
+                "profile_picture": pfp_analysis.get("risk_score", 0.0),
                 "detailed_scores": {
                     "username": username_sentiment.get("detailed_scores", []),
                     "fullname": fullname_sentiment.get("detailed_scores", []),
-                    "bio": bio_sentiment.get("detailed_scores", [])
+                    "bio": bio_sentiment.get("detailed_scores", []),
+                    "profile_picture": pfp_analysis.get("detected_categories", {})
                 }
             }
-            overall_risk = (
-                risk_scores["username"] * 0.2 +
-                risk_scores["fullname"] * 0.2 +
-                risk_scores["bio"] * 0.6
+
+            # Calculate weighted risk score
+            # Weights: Username (15%), Full Name (15%), Bio (40%), Profile Picture (30%)
+            weighted_risk = (
+                text_risk_scores["username"] * 0.15 +
+                text_risk_scores["fullname"] * 0.15 +
+                text_risk_scores["bio"] * 0.40 +
+                text_risk_scores["profile_picture"] * 0.30
             )
+
+            # Additional risk factors from bio
             additional_risk_factors = detect_risk_keywords(profile.biography)
             keyword_risk = len(additional_risk_factors) * 0.1
-            final_risk = min(1.0, overall_risk + keyword_risk)
+            final_risk = min(1.0, weighted_risk + keyword_risk)
+
             return {
                 "profile_data": profile_data,
                 "sentiment_analysis": {
@@ -148,8 +270,9 @@ def analyze_instagram_profile(username, analyzer, insta_context, retry_count=3, 
                     "fullname": fullname_sentiment,
                     "bio": bio_sentiment,
                 },
+                "profile_picture_analysis": pfp_analysis,
                 "risk_assessment": {
-                    "individual_risks": risk_scores,
+                    "individual_risks": text_risk_scores,
                     "overall_risk": final_risk,
                     "risk_level": get_risk_level(final_risk),
                     "risk_keywords_detected": additional_risk_factors,
@@ -166,16 +289,12 @@ def analyze_instagram_profile(username, analyzer, insta_context, retry_count=3, 
                     wait_time = retry_delay * (2 ** attempt) + random.uniform(0, 1)
                     print(f"Waiting for {wait_time:.1f} seconds before retry {attempt+1}/{retry_count}")
                     time.sleep(wait_time)
-                else:
-                    return {"error": "Instagram authentication error. Try again later or use a different account."}
             else:
                 print(f"Connection error: {str(e)}")
                 if attempt < retry_count - 1:
                     wait_time = retry_delay * (attempt + 1) + random.uniform(0, 1)
                     print(f"Waiting for {wait_time:.1f} seconds before retry {attempt+1}/{retry_count}")
                     time.sleep(wait_time)
-                else:
-                    return {"error": f"Failed to connect to Instagram after {retry_count} attempts: {str(e)}"}
         except instaloader.exceptions.ProfileNotExistsException:
             return {"error": f"Profile '{username}' does not exist"}
         except Exception as e:
@@ -523,7 +642,7 @@ def log_profile_risk(username, risk_score, risk_level, log_file="log.json"):
 
 def display_priority_log(log_file="log.json"):
     """
-    Display priority log sorted by risk score
+    Display priority log sorted by risk score with enhanced visualization and delete functionality
 
     Args:
         log_file (str): Path to the log file
@@ -533,35 +652,97 @@ def display_priority_log(log_file="log.json"):
             with open(log_file, 'r', encoding='utf-8') as f:
                 try:
                     logs = json.load(f)
+                    if not isinstance(logs, dict):
+                        logs = {"profiles": []}
+                    if "profiles" not in logs:
+                        logs["profiles"] = []
                 except json.JSONDecodeError:
-                    st.error("Error reading log file. File may be corrupted.")
-                    return
-            sorted_profiles = sorted(
-                logs["profiles"],
-                key=lambda x: x["risk_score"],
-                reverse=True
-            )
-            if sorted_profiles:
-                df = pd.DataFrame(sorted_profiles)
-                def highlight_risk(row):
-                    if row['risk_level'] == 'High':
-                        return ['background-color: #ffcccc'] * len(row)
-                    elif row['risk_level'] == 'Medium':
-                        return ['background-color: #ffffcc'] * len(row)
-                    else:
-                        return ['background-color: #ccffcc'] * len(row)
-                st.dataframe(df.style.apply(highlight_risk, axis=1))
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Download as CSV",
-                    data=csv,
-                    file_name="instagram_risk_log.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.info("No profiles have been analyzed yet.")
+                    logs = {"profiles": []}
         else:
-            st.info("No logs available. Analyze profiles to create log entries.")
+            logs = {"profiles": []}
+            
+        sorted_profiles = sorted(
+            logs["profiles"],
+            key=lambda x: x["risk_score"],
+            reverse=True
+        )
+        
+        if sorted_profiles:
+            # Create DataFrame with additional columns
+            df = pd.DataFrame(sorted_profiles)
+            
+            # Add priority indicator column
+            def get_priority_indicator(risk_level):
+                if risk_level == 'High':
+                    return '🔴'  # Red circle
+                elif risk_level == 'Medium':
+                    return '🟡'  # Yellow circle
+                else:
+                    return '🟢'  # Green circle
+            
+            df.insert(0, 'Priority', df['risk_level'].apply(get_priority_indicator))
+            
+            # Display the DataFrame with custom styling
+            st.dataframe(
+                df[['Priority', 'username', 'risk_score', 'risk_level', 'timestamp']],
+                column_config={
+                    'Priority': st.column_config.TextColumn(
+                        'Priority',
+                        help='Risk level indicator',
+                        width='small'
+                    ),
+                    'username': st.column_config.TextColumn(
+                        'Username',
+                        help='Instagram username'
+                    ),
+                    'risk_score': st.column_config.NumberColumn(
+                        'Risk Score',
+                        help='Calculated risk score (0-1)',
+                        format='%.2f'
+                    ),
+                    'risk_level': st.column_config.TextColumn(
+                        'Risk Level',
+                        help='Risk level category'
+                    ),
+                    'timestamp': st.column_config.DatetimeColumn(
+                        'Timestamp',
+                        help='Analysis timestamp'
+                    )
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            # Add individual delete buttons for each entry
+            st.subheader("Delete Entries")
+            for idx, profile in enumerate(sorted_profiles):
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    st.write(f"Username: {profile['username']} (Risk Level: {profile['risk_level']})")
+                with col2:
+                    st.write(f"Score: {profile['risk_score']:.2f}")
+                with col3:
+                    if st.button("Delete", key=f"delete_{idx}"):
+                        # Remove the entry from the logs
+                        logs["profiles"] = [p for p in logs["profiles"] if p["username"] != profile["username"]]
+                        
+                        # Save updated logs to file
+                        with open(log_file, 'w', encoding='utf-8') as f:
+                            json.dump(logs, f, indent=4)
+                        
+                        st.success(f"Entry for {profile['username']} deleted successfully!")
+                        st.experimental_rerun()
+            
+            # Add download button
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="Download as CSV",
+                data=csv,
+                file_name="instagram_risk_log.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("No profiles have been analyzed yet.")
     except Exception as e:
         st.error(f"Error displaying priority log: {str(e)}")
 
@@ -578,6 +759,8 @@ def streamlit_app():
         st.session_state.login_status = None
     if 'show_priority_log' not in st.session_state:
         st.session_state.show_priority_log = False
+    if 'selected_rows' not in st.session_state:
+        st.session_state.selected_rows = []
     with st.sidebar:
         st.header("Instagram Credentials")
         st.warning("Note: Instagram may rate-limit your requests. If you encounter errors, try again later or use a different account.")
@@ -648,6 +831,36 @@ def streamlit_app():
         col1, col2 = st.columns(2)
         with col1:
             st.header(f"Profile: @{profile_analysis['profile_data']['username']}")
+            
+            # Display profile picture and analysis
+            if profile_analysis['profile_data'].get('profile_pic_url'):
+                try:
+                    # Download and display the profile picture
+                    response = requests.get(profile_analysis['profile_data']['profile_pic_url'])
+                    if response.status_code == 200:
+                        img = Image.open(BytesIO(response.content))
+                        st.image(img, width=200, caption=f"@{profile_analysis['profile_data']['username']}'s Profile Picture")
+                        
+                        # Display profile picture analysis if available
+                        if 'profile_picture_analysis' in profile_analysis:
+                            pfp_analysis = profile_analysis['profile_picture_analysis']
+                            st.subheader("Profile Picture Analysis")
+                            
+                            # Display risk score with color coding
+                            risk_score = pfp_analysis.get('risk_score', 0.0)
+                            risk_color = "green" if risk_score < 0.3 else "orange" if risk_score < 0.6 else "red"
+                            st.markdown(f"Risk Score: <span style='color:{risk_color}'>{risk_score:.2f}</span>", unsafe_allow_html=True)
+                            
+                            # Display detected categories if any
+                            if pfp_analysis.get('detected_categories'):
+                                st.write("Detected Categories:")
+                                for category, confidence in pfp_analysis['detected_categories'].items():
+                                    st.write(f"- {category.title()}: {confidence:.2%}")
+                    else:
+                        st.warning("Could not load profile picture")
+                except Exception as e:
+                    st.warning(f"Error loading profile picture: {str(e)}")
+            
             st.write(f"Full Name: {profile_analysis['profile_data']['fullname']}")
             st.write(f"Followers: {profile_analysis['profile_data']['followers']:,}")
             st.write(f"Following: {profile_analysis['profile_data']['following']:,}")

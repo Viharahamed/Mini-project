@@ -174,8 +174,6 @@ def analyze_instagram_profile(username, analyzer, insta_context, retry_count=3, 
                     wait_time = retry_delay * (attempt + 1) + random.uniform(0, 1)
                     print(f"Waiting for {wait_time:.1f} seconds before retry {attempt+1}/{retry_count}")
                     time.sleep(wait_time)
-                else:
-                    return {"error": f"Failed to connect to Instagram after {retry_count} attempts: {str(e)}"}
         except instaloader.exceptions.ProfileNotExistsException:
             return {"error": f"Profile '{username}' does not exist"}
         except Exception as e:
@@ -523,7 +521,7 @@ def log_profile_risk(username, risk_score, risk_level, log_file="log.json"):
 
 def display_priority_log(log_file="log.json"):
     """
-    Display priority log sorted by risk score
+    Display priority log sorted by risk score with enhanced visualization and delete functionality
 
     Args:
         log_file (str): Path to the log file
@@ -533,35 +531,97 @@ def display_priority_log(log_file="log.json"):
             with open(log_file, 'r', encoding='utf-8') as f:
                 try:
                     logs = json.load(f)
+                    if not isinstance(logs, dict):
+                        logs = {"profiles": []}
+                    if "profiles" not in logs:
+                        logs["profiles"] = []
                 except json.JSONDecodeError:
-                    st.error("Error reading log file. File may be corrupted.")
-                    return
-            sorted_profiles = sorted(
-                logs["profiles"],
-                key=lambda x: x["risk_score"],
-                reverse=True
-            )
-            if sorted_profiles:
-                df = pd.DataFrame(sorted_profiles)
-                def highlight_risk(row):
-                    if row['risk_level'] == 'High':
-                        return ['background-color: #ffcccc'] * len(row)
-                    elif row['risk_level'] == 'Medium':
-                        return ['background-color: #ffffcc'] * len(row)
-                    else:
-                        return ['background-color: #ccffcc'] * len(row)
-                st.dataframe(df.style.apply(highlight_risk, axis=1))
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Download as CSV",
-                    data=csv,
-                    file_name="instagram_risk_log.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.info("No profiles have been analyzed yet.")
+                    logs = {"profiles": []}
         else:
-            st.info("No logs available. Analyze profiles to create log entries.")
+            logs = {"profiles": []}
+            
+        sorted_profiles = sorted(
+            logs["profiles"],
+            key=lambda x: x["risk_score"],
+            reverse=True
+        )
+        
+        if sorted_profiles:
+            # Create DataFrame with additional columns
+            df = pd.DataFrame(sorted_profiles)
+            
+            # Add priority indicator column
+            def get_priority_indicator(risk_level):
+                if risk_level == 'High':
+                    return '🔴'  # Red circle
+                elif risk_level == 'Medium':
+                    return '🟡'  # Yellow circle
+                else:
+                    return '🟢'  # Green circle
+            
+            df.insert(0, 'Priority', df['risk_level'].apply(get_priority_indicator))
+            
+            # Display the DataFrame with custom styling
+            st.dataframe(
+                df[['Priority', 'username', 'risk_score', 'risk_level', 'timestamp']],
+                column_config={
+                    'Priority': st.column_config.TextColumn(
+                        'Priority',
+                        help='Risk level indicator',
+                        width='small'
+                    ),
+                    'username': st.column_config.TextColumn(
+                        'Username',
+                        help='Instagram username'
+                    ),
+                    'risk_score': st.column_config.NumberColumn(
+                        'Risk Score',
+                        help='Calculated risk score (0-1)',
+                        format='%.2f'
+                    ),
+                    'risk_level': st.column_config.TextColumn(
+                        'Risk Level',
+                        help='Risk level category'
+                    ),
+                    'timestamp': st.column_config.DatetimeColumn(
+                        'Timestamp',
+                        help='Analysis timestamp'
+                    )
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+            
+            # Add individual delete buttons for each entry
+            st.subheader("Delete Entries")
+            for idx, profile in enumerate(sorted_profiles):
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    st.write(f"Username: {profile['username']} (Risk Level: {profile['risk_level']})")
+                with col2:
+                    st.write(f"Score: {profile['risk_score']:.2f}")
+                with col3:
+                    if st.button("Delete", key=f"delete_{idx}"):
+                        # Remove the entry from the logs
+                        logs["profiles"] = [p for p in logs["profiles"] if p["username"] != profile["username"]]
+                        
+                        # Save updated logs to file
+                        with open(log_file, 'w', encoding='utf-8') as f:
+                            json.dump(logs, f, indent=4)
+                        
+                        st.success(f"Entry for {profile['username']} deleted successfully!")
+                        st.experimental_rerun()
+            
+            # Add download button
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="Download as CSV",
+                data=csv,
+                file_name="instagram_risk_log.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("No profiles have been analyzed yet.")
     except Exception as e:
         st.error(f"Error displaying priority log: {str(e)}")
 
@@ -578,6 +638,8 @@ def streamlit_app():
         st.session_state.login_status = None
     if 'show_priority_log' not in st.session_state:
         st.session_state.show_priority_log = False
+    if 'selected_rows' not in st.session_state:
+        st.session_state.selected_rows = []
     with st.sidebar:
         st.header("Instagram Credentials")
         st.warning("Note: Instagram may rate-limit your requests. If you encounter errors, try again later or use a different account.")
